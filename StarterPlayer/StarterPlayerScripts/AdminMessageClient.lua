@@ -52,4 +52,4 @@ adminMessageRemote.OnClientEvent:Connect(function(message)
 	displayMessage(message)
 end)
 
-print("✓ AdminMessageClient loaded and ready!")
+print("? AdminMessageClient loaded and ready!")

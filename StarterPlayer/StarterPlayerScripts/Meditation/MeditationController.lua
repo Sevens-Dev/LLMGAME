@@ -1,6 +1,6 @@
 --[[
-	MeditationController.lua (StarterPlayerScripts)
-	Client-side meditation and chi flow visualization
+	MeditationController_Enhanced.lua (StarterPlayerScripts)
+	?? ENHANCED VERSION - Spectacular chi flow visualization with particles and effects
 --]]
 
 local Players = game:GetService("Players")
@@ -33,12 +33,11 @@ local MeditationState = {
 	PlayerPath = {},
 	CurrentLevel = 1,
 	CurrentDifficulty = nil,
-	Stones = {}, -- Meditation stones (tiles)
+	Stones = {},
 	ChiParticles = {},
-	-- Tracing/Swiping mechanic
 	IsTracing = false,
 	LastTouchedStone = nil,
-	TracedStones = {}, -- Track which stones have been traced over
+	TracedStones = {},
 	TraceStartTime = 0
 }
 
@@ -47,7 +46,7 @@ local Sounds = {}
 
 local function createSound(name: string, soundId: string, volume: number): Sound?
 	if soundId == "" then
-		return nil -- Skip empty sounds
+		return nil
 	end
 
 	local sound = Instance.new("Sound")
@@ -64,7 +63,7 @@ for soundName, soundId in pairs(MeditationConfig.Sounds) do
 	Sounds[soundName] = createSound(soundName, soundId, volume)
 end
 
--- Start ambient meditation music (if it exists)
+-- Start ambient music
 if Sounds.TempleAmbience then
 	Sounds.TempleAmbience.Looped = true
 	Sounds.TempleAmbience:Play()
@@ -73,16 +72,175 @@ end
 -- UI Helpers
 local function smoothShow(frame: Frame)
 	frame.Visible = true
-	-- Simple fade in by just making visible
-	-- Note: For smooth fades, wrap content in CanvasGroup in future
+	frame.BackgroundTransparency = 1
+	-- Hide HUD when any significant frame opens
+	if frame == MeditationFrame or frame == MenuFrame or frame == ResultFrame then
+		if _G.HideHUD then _G.HideHUD() end
+	end
+	-- Fade in with scale animation
+	local originalSize = frame.Size
+	frame.Size = UDim2.new(
+		originalSize.X.Scale * 0.9,
+		originalSize.X.Offset * 0.9,
+		originalSize.Y.Scale * 0.9,
+		originalSize.Y.Offset * 0.9
+	)
+	local fadeIn = TweenService:Create(frame, TweenInfo.new(0.4, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+		BackgroundTransparency = 0,
+		Size = originalSize
+	})
+	fadeIn:Play()
 end
 
 local function smoothHide(frame: Frame)
-	-- Simple hide
-	frame.Visible = false
+	local fadeOut = TweenService:Create(frame, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+		BackgroundTransparency = 1
+	})
+	fadeOut:Play()
+	fadeOut.Completed:Connect(function()
+		frame.Visible = false
+		-- Now check AFTER the frame is actually hidden
+		if frame == MeditationFrame or frame == MenuFrame or frame == ResultFrame then
+			local anyVisible = MeditationFrame.Visible or MenuFrame.Visible or ResultFrame.Visible
+			if not anyVisible and _G.ShowHUD then _G.ShowHUD() end
+		end
+	end)
 end
 
--- Create meditation stone grid (mandala pattern)
+-- ============================================================================
+-- ENHANCED PARTICLE EFFECTS
+-- ============================================================================
+
+local function createChiParticles(parent: GuiObject, color: Color3): ParticleEmitter
+	local particles = Instance.new("ParticleEmitter")
+	particles.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+	particles.Rate = 40
+	particles.Lifetime = NumberRange.new(0.6, 1.2)
+	particles.Speed = NumberRange.new(3, 6)
+	particles.SpreadAngle = Vector2.new(180, 180)
+	particles.Rotation = NumberRange.new(0, 360)
+	particles.RotSpeed = NumberRange.new(-100, 100)
+	particles.Color = ColorSequence.new(color)
+	particles.Transparency = NumberSequence.new{
+		NumberSequenceKeypoint.new(0, 0.3),
+		NumberSequenceKeypoint.new(0.5, 0.1),
+		NumberSequenceKeypoint.new(1, 1)
+	}
+	particles.Size = NumberSequence.new{
+		NumberSequenceKeypoint.new(0, 0.4),
+		NumberSequenceKeypoint.new(0.5, 0.6),
+		NumberSequenceKeypoint.new(1, 0.2)
+	}
+	particles.LightEmission = 1
+	particles.LightInfluence = 0
+	particles.ZOffset = 1
+	particles.Parent = parent
+
+	return particles
+end
+
+local function createExplosionEffect(parent: GuiObject, color: Color3)
+	-- Burst particles
+	local burst = Instance.new("ParticleEmitter")
+	burst.Texture = "rbxasset://textures/particles/sparkles_main.dds"
+	burst.Rate = 0
+	burst.Lifetime = NumberRange.new(0.4, 0.8)
+	burst.Speed = NumberRange.new(8, 15)
+	burst.SpreadAngle = Vector2.new(180, 180)
+	burst.Color = ColorSequence.new(color)
+	burst.Transparency = NumberSequence.new{
+		NumberSequenceKeypoint.new(0, 0),
+		NumberSequenceKeypoint.new(1, 1)
+	}
+	burst.Size = NumberSequence.new{
+		NumberSequenceKeypoint.new(0, 0.8),
+		NumberSequenceKeypoint.new(1, 0)
+	}
+	burst.LightEmission = 1
+	burst.ZOffset = 2
+	burst.Parent = parent
+
+	burst:Emit(30)
+
+	task.delay(1.5, function()
+		burst:Destroy()
+	end)
+
+	return burst
+end
+
+local function createChiTrail(stone: TextButton, targetStone: TextButton, color: Color3)
+	-- Create a beam-like effect using a Frame
+	local trail = Instance.new("Frame")
+	trail.Name = "ChiTrail"
+	trail.BackgroundColor3 = color
+	trail.BorderSizePixel = 0
+	trail.ZIndex = 1
+	trail.Parent = MandalaGrid
+
+	-- Calculate position and size
+	local startPos = stone.AbsolutePosition
+	local endPos = targetStone.AbsolutePosition
+	local midX = (startPos.X + endPos.X) / 2
+	local midY = (startPos.Y + endPos.Y) / 2
+
+	local deltaX = endPos.X - startPos.X
+	local deltaY = endPos.Y - startPos.Y
+	local distance = math.sqrt(deltaX^2 + deltaY^2)
+	local angle = math.deg(math.atan2(deltaY, deltaX))
+
+	trail.Size = UDim2.new(0, distance, 0, 4)
+	trail.Position = UDim2.new(0, midX - distance/2, 0, midY - 2)
+	trail.Rotation = angle
+	trail.AnchorPoint = Vector2.new(0.5, 0.5)
+
+	-- Gradient effect
+	local gradient = Instance.new("UIGradient")
+	gradient.Color = ColorSequence.new{
+		ColorSequenceKeypoint.new(0, color),
+		ColorSequenceKeypoint.new(0.5, Color3.fromRGB(255, 255, 255)),
+		ColorSequenceKeypoint.new(1, color)
+	}
+	gradient.Parent = trail
+
+	-- Glow
+	local glow = Instance.new("UIStroke")
+	glow.Color = color
+	glow.Thickness = 3
+	glow.Transparency = 0.3
+	glow.Parent = trail
+
+	-- Animate in
+	trail.BackgroundTransparency = 1
+	glow.Transparency = 1
+
+	TweenService:Create(trail, TweenInfo.new(0.2), {
+		BackgroundTransparency = 0.3
+	}):Play()
+
+	TweenService:Create(glow, TweenInfo.new(0.2), {
+		Transparency = 0
+	}):Play()
+
+	-- Fade out after a bit
+	task.delay(0.5, function()
+		TweenService:Create(trail, TweenInfo.new(0.3), {
+			BackgroundTransparency = 1
+		}):Play()
+
+		TweenService:Create(glow, TweenInfo.new(0.3), {
+			Transparency = 1
+		}):Play()
+
+		task.wait(0.3)
+		trail:Destroy()
+	end)
+end
+
+-- ============================================================================
+-- CREATE MEDITATION STONE GRID
+-- ============================================================================
+
 local function createMandalaGrid()
 	-- Clear existing stones
 	for _, stone in pairs(MeditationState.Stones) do
@@ -91,25 +249,21 @@ local function createMandalaGrid()
 	MeditationState.Stones = {}
 
 	if not MandalaGrid then
-		warn("❌ MandalaGrid not found! Check UI structure.")
+		warn("? MandalaGrid not found!")
 		return
 	end
-
-	print("✓ MandalaGrid found at:", MandalaGrid:GetFullName())
 
 	local gridSize = MeditationConfig.GridSize
 	local stoneSize = UDim2.new(0.20, 0, 0.20, 0)
 	local spacing = 0.03
 
-	print("Creating " .. (gridSize * gridSize) .. " meditation stones in " .. gridSize .. "x" .. gridSize .. " grid...")
-
-	local stonesCreated = 0
+	print("Creating " .. (gridSize * gridSize) .. " meditation stones...")
 
 	for row = 0, gridSize - 1 do
 		for col = 0, gridSize - 1 do
 			local stoneIndex = row * gridSize + col + 1
 
-			-- Create meditation stone
+			-- Create stone
 			local stone = Instance.new("TextButton")
 			stone.Name = "Stone_" .. stoneIndex
 			stone.Size = stoneSize
@@ -121,7 +275,7 @@ local function createMandalaGrid()
 			)
 			stone.BackgroundColor3 = MeditationConfig.Colors.Chi.Dormant
 			stone.BorderSizePixel = 0
-			stone.Text = tostring(stoneIndex) -- TEMPORARY: Show numbers for debugging
+			stone.Text = "" -- No numbers in production
 			stone.TextColor3 = Color3.fromRGB(150, 150, 150)
 			stone.TextScaled = true
 			stone.AutoButtonColor = false
@@ -129,37 +283,41 @@ local function createMandalaGrid()
 			stone.ZIndex = 2
 			stone.Parent = MandalaGrid
 
-			-- Rounded stone shape
+			-- Rounded corners
 			local corner = Instance.new("UICorner")
-			corner.CornerRadius = UDim.new(0.15, 0)
-			corner.Parent = stone
-			stone.AutoButtonColor = false
-			stone.Parent = MandalaGrid
-
-			-- Rounded stone shape
-			local corner = Instance.new("UICorner")
-			corner.CornerRadius = UDim.new(0.15, 0)
+			corner.CornerRadius = UDim.new(0.2, 0)
 			corner.Parent = stone
 
-			-- Subtle glow effect
+			-- Glowing stroke
 			local glow = Instance.new("UIStroke")
 			glow.Name = "Glow"
-			glow.Color = MeditationConfig.Colors.Chi.White
+			glow.Color = Color3.fromRGB(100, 200, 255)
 			glow.Thickness = 0
 			glow.Transparency = 0.5
 			glow.Parent = stone
 
+			-- Inner shadow/depth
+			local gradient = Instance.new("UIGradient")
+			gradient.Color = ColorSequence.new{
+				ColorSequenceKeypoint.new(0, Color3.fromRGB(255, 255, 255)),
+				ColorSequenceKeypoint.new(1, Color3.fromRGB(100, 100, 120))
+			}
+			gradient.Transparency = NumberSequence.new{
+				NumberSequenceKeypoint.new(0, 0.7),
+				NumberSequenceKeypoint.new(1, 0.3)
+			}
+			gradient.Rotation = 45
+			gradient.Parent = stone
+
 			-- Store reference
 			MeditationState.Stones[stoneIndex] = stone
-			stonesCreated = stonesCreated + 1
 
-			-- TRACING/SWIPING HANDLERS (works for both PC drag and mobile swipe)
+			-- Input handlers
 			stone.InputBegan:Connect(function(input)
 				if not (MeditationState.IsMeditating and not MeditationState.IsShowingFlow) then
 					return
 				end
 
-				-- Start tracing on click/touch
 				if input.UserInputType == Enum.UserInputType.MouseButton1 or 
 					input.UserInputType == Enum.UserInputType.Touch then
 					startTracing(stoneIndex)
@@ -167,18 +325,14 @@ local function createMandalaGrid()
 			end)
 
 			stone.MouseEnter:Connect(function()
-				-- Continue trace when mouse enters stone while dragging
 				if MeditationState.IsTracing then
 					continueTracing(stoneIndex)
 				end
 			end)
-
-			-- Note: TouchMoved doesn't exist on TextButton
-			-- Mobile touch is handled by InputBegan and MouseEnter during drag
 		end
 	end
 
-	-- Global input handlers for ending trace
+	-- Global input handlers
 	local UserInputService = game:GetService("UserInputService")
 
 	UserInputService.InputEnded:Connect(function(input)
@@ -188,10 +342,8 @@ local function createMandalaGrid()
 		end
 	end)
 
-	-- Handle touch drag for mobile (InputChanged detects movement)
 	UserInputService.InputChanged:Connect(function(input)
 		if input.UserInputType == Enum.UserInputType.Touch and MeditationState.IsTracing then
-			-- Check which stone the touch is over
 			local touchPos = input.Position
 
 			for stoneIndex, stone in pairs(MeditationState.Stones) do
@@ -207,121 +359,116 @@ local function createMandalaGrid()
 		end
 	end)
 
-	-- Count stones properly
-	local stoneCount = 0
-	for _ in pairs(MeditationState.Stones) do
-		stoneCount = stoneCount + 1
-	end
-
-	print("✓ Successfully created " .. stonesCreated .. " meditation stones")
-	print("   Stones stored in table: " .. stoneCount)
-	print("   MandalaGrid children: " .. #MandalaGrid:GetChildren())
+	print("? Created " .. #MeditationState.Stones .. " meditation stones with effects!")
 end
 
--- Animate chi flowing through a stone
+-- ============================================================================
+-- SPECTACULAR CHI FLOW ANIMATION
+-- ============================================================================
+
 local function flowChiThroughStone(stoneIndex: number, chiColor: Color3, duration: number, glowIntensity: number)
 	local stone = MeditationState.Stones[stoneIndex]
 	if not stone then return end
 
 	local glow = stone:FindFirstChild("Glow")
-	local originalColor = stone.BackgroundColor3
 
-	-- Create particle effect for chi energy
+	-- EXPLOSIVE PARTICLE EFFECT
 	if MeditationConfig.Effects.EnableParticles then
-		local particles = Instance.new("ParticleEmitter")
-		particles.Texture = "rbxasset://textures/particles/sparkles_main.dds"
-		particles.Rate = 30
-		particles.Lifetime = NumberRange.new(0.5, 1.0)
-		particles.Speed = NumberRange.new(2, 4)
-		particles.SpreadAngle = Vector2.new(180, 180)
-		particles.Color = ColorSequence.new(chiColor)
-		particles.Transparency = NumberSequence.new({
-			NumberSequenceKeypoint.new(0, 0.5),
-			NumberSequenceKeypoint.new(1, 1)
-		})
-		particles.Size = NumberSequence.new({
-			NumberSequenceKeypoint.new(0, 0.2),
-			NumberSequenceKeypoint.new(1, 0)
-		})
-		particles.Parent = stone
-
-		-- Store for cleanup
-		table.insert(MeditationState.ChiParticles, particles)
-
-		task.delay(0.3, function()
-			particles.Enabled = false
-			task.wait(1)
-			particles:Destroy()
-		end)
+		createChiParticles(stone, chiColor)
+		createExplosionEffect(stone, chiColor)
 	end
 
-	-- Glow pulse
+	-- INTENSE GLOW PULSE
 	if glow and MeditationConfig.Effects.EnableGlow then
-		TweenService:Create(glow, TweenInfo.new(0.1), {
-			Thickness = glowIntensity or 3,
-			Transparency = 0.3
-		}):Play()
+		-- Pulse multiple times
+		for i = 1, 2 do
+			TweenService:Create(glow, TweenInfo.new(0.1, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+				Thickness = glowIntensity * 1.5,
+				Transparency = 0,
+				Color = chiColor
+			}):Play()
+
+			task.wait(0.15)
+
+			TweenService:Create(glow, TweenInfo.new(0.1), {
+				Thickness = glowIntensity,
+				Transparency = 0.2
+			}):Play()
+
+			task.wait(0.1)
+		end
 	end
 
-	-- Color flow
-	local flowTween = TweenService:Create(stone, TweenInfo.new(0.15, Enum.EasingStyle.Sine), {
-		BackgroundColor3 = chiColor
+	-- VIBRANT COLOR FLOW with bounce
+	local colorTween = TweenService:Create(stone, TweenInfo.new(0.15, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
+		BackgroundColor3 = chiColor,
+		Size = UDim2.new(
+			stone.Size.X.Scale * 1.1,
+			stone.Size.X.Offset * 1.1,
+			stone.Size.Y.Scale * 1.1,
+			stone.Size.Y.Offset * 1.1
+		)
 	})
-	flowTween:Play()
+	colorTween:Play()
 
 	-- Hold the chi
 	task.wait(duration)
 
-	-- Release the chi
+	-- Release with elegant fade
 	if glow then
-		TweenService:Create(glow, TweenInfo.new(0.3), {
+		TweenService:Create(glow, TweenInfo.new(0.4, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
 			Thickness = 0,
 			Transparency = 0.8
 		}):Play()
 	end
 
-	local releaseTween = TweenService:Create(stone, TweenInfo.new(0.4, Enum.EasingStyle.Sine), {
-		BackgroundColor3 = MeditationConfig.Colors.Chi.Dormant
+	local releaseTween = TweenService:Create(stone, TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+		BackgroundColor3 = MeditationConfig.Colors.Chi.Dormant,
+		Size = UDim2.new(0.20, 0, 0.20, 0)
 	})
 	releaseTween:Play()
 end
 
--- Show the chi flow path
+-- Show the chi flow path with trails
 local function showChiFlow(path: {number}, flowTime: number, chiColor: Color3)
 	MeditationState.IsShowingFlow = true
 	MeditationState.PlayerPath = {}
 	MeditationState.TracedStones = {}
 
-
-	-- Update UI
 	InfoFrame.WisdomLabel.Text = MeditationConfig.TechniqueDescriptions[1]
-	InfoFrame.StateLabel.Text = "OBSERVE THE ENERGY FLOW"
+	InfoFrame.StateLabel.Text = "? OBSERVE THE ENERGY ?"
 	InfoFrame.StateLabel.TextColor3 = MeditationConfig.Colors.Accent
 
 	-- Breathing preparation
-	print("   Preparation phase - " .. MeditationConfig.MeditationPrepareTime .. " seconds...")
+	print("   Preparation phase...")
 	task.wait(MeditationConfig.MeditationPrepareTime)
 
-	-- Play breath in sound
 	if Sounds.BreathIn then
 		Sounds.BreathIn:Play()
 	end
 
-	print("   Displaying sequence...")
+	print("   Displaying chi flow sequence...")
 
-	-- Show each stone in the chi path
+	-- Show path with connecting trails
 	for i, stoneIndex in ipairs(path) do
 		print("   Stone " .. i .. "/" .. #path .. " - Index: " .. stoneIndex)
 
-		-- Play chi flow sound
 		if Sounds.ChiFlow then
 			Sounds.ChiFlow:Play()
 		end
 
-		-- Visualize chi flowing
-		flowChiThroughStone(stoneIndex, chiColor, flowTime, 4)
+		-- Create trail to previous stone
+		if i > 1 then
+			local prevStone = MeditationState.Stones[path[i-1]]
+			local currentStone = MeditationState.Stones[stoneIndex]
+			if prevStone and currentStone then
+				createChiTrail(prevStone, currentStone, chiColor)
+			end
+		end
 
-		-- Breathing rhythm
+		-- Spectacular chi flow
+		flowChiThroughStone(stoneIndex, chiColor, flowTime, 6)
+
 		task.wait(flowTime + MeditationConfig.ExhaleTime)
 
 		if i < #path and Sounds.BreathOut then
@@ -331,15 +478,16 @@ local function showChiFlow(path: {number}, flowTime: number, chiColor: Color3)
 
 	MeditationState.IsShowingFlow = false
 
-	-- Update UI for player's turn
-	InfoFrame.StateLabel.Text = "RECREATE THE FLOW"
-	InfoFrame.StateLabel.TextColor3 = MeditationConfig.Colors.Chi.Gold
-	InfoFrame.WisdomLabel.Text = "Trust your memory. Feel the path."
+	-- Player's turn
+	InfoFrame.StateLabel.Text = "?? RECREATE THE FLOW ??"
+	InfoFrame.StateLabel.TextColor3 = Color3.fromRGB(255, 200, 50)
+	InfoFrame.WisdomLabel.Text = "Trust your instincts. Feel the energy."
 end
 
--- TRACING FUNCTIONS (Swipe/Drag mechanic)
+-- ============================================================================
+-- TRACING FUNCTIONS
+-- ============================================================================
 
--- Start tracing when player clicks/touches first stone
 function startTracing(stoneIndex: number)
 	if MeditationState.IsTracing then return end
 
@@ -349,142 +497,135 @@ function startTracing(stoneIndex: number)
 	MeditationState.TracedStones = {}
 	MeditationState.TraceStartTime = tick()
 
-	-- Add first stone
 	table.insert(MeditationState.PlayerPath, stoneIndex)
 	MeditationState.TracedStones[stoneIndex] = true
 
-	-- Visual & audio feedback
 	if Sounds.ChiFlow then
 		Sounds.ChiFlow:Play()
 	end
 
 	local chiColor = MeditationConfig.GetChiColor(MeditationState.CurrentLevel)
-	flowChiThroughStone(stoneIndex, MeditationConfig.Colors.Active, 0.5, 3)
+	flowChiThroughStone(stoneIndex, Color3.fromRGB(255, 215, 0), 0.5, 4)
 
-	-- Update UI
-	InfoFrame.StateLabel.Text = "TRACE THE PATH..."
-	InfoFrame.StateLabel.TextColor3 = MeditationConfig.Colors.Chi.Gold
+	InfoFrame.StateLabel.Text = "? TRACING PATH... ?"
+	InfoFrame.StateLabel.TextColor3 = Color3.fromRGB(255, 215, 0)
 
 	local progressText = string.format("%d / %d", #MeditationState.PlayerPath, #MeditationState.CurrentPath)
-	InfoFrame.ProgressLabel.Text = "Flow Progress: " .. progressText
+	InfoFrame.ProgressLabel.Text = "Progress: " .. progressText
 
-	print("🧘 Started tracing at stone " .. stoneIndex)
+	print("?? Started tracing at stone " .. stoneIndex)
 end
 
--- Continue tracing as player drags/swipes over stones
 function continueTracing(stoneIndex: number)
 	if not MeditationState.IsTracing then return end
-	if MeditationState.TracedStones[stoneIndex] then return end -- Already traced this stone
-	if stoneIndex == MeditationState.LastTouchedStone then return end -- Same stone
+	if MeditationState.TracedStones[stoneIndex] then return end
+	if stoneIndex == MeditationState.LastTouchedStone then return end
 
-	-- Add to path
 	table.insert(MeditationState.PlayerPath, stoneIndex)
 	MeditationState.TracedStones[stoneIndex] = true
+
+	-- Create trail from last stone
+	local lastStone = MeditationState.Stones[MeditationState.LastTouchedStone]
+	local currentStone = MeditationState.Stones[stoneIndex]
+	if lastStone and currentStone then
+		createChiTrail(lastStone, currentStone, Color3.fromRGB(255, 215, 0))
+	end
+
 	MeditationState.LastTouchedStone = stoneIndex
 
-	-- Visual & audio feedback
 	if Sounds.ChiFlow then
 		Sounds.ChiFlow:Play()
 	end
 
-	local chiColor = MeditationConfig.GetChiColor(MeditationState.CurrentLevel)
-	flowChiThroughStone(stoneIndex, MeditationConfig.Colors.Active, 0.5, 3)
+	flowChiThroughStone(stoneIndex, Color3.fromRGB(255, 215, 0), 0.5, 4)
 
-	-- Update progress
 	local progressText = string.format("%d / %d", #MeditationState.PlayerPath, #MeditationState.CurrentPath)
-	InfoFrame.ProgressLabel.Text = "Flow Progress: " .. progressText
+	InfoFrame.ProgressLabel.Text = "Progress: " .. progressText
 
-	print("🧘 Traced through stone " .. stoneIndex .. " (Total: " .. #MeditationState.PlayerPath .. ")")
+	print("?? Traced through stone " .. stoneIndex)
 end
 
--- End tracing when player releases click/touch
 function endTracing()
 	if not MeditationState.IsTracing then return end
 
 	MeditationState.IsTracing = false
 
 	local traceTime = tick() - MeditationState.TraceStartTime
-	print("🧘 Ended trace - " .. #MeditationState.PlayerPath .. " stones in " .. string.format("%.1f", traceTime) .. "s")
+	print("?? Ended trace - " .. #MeditationState.PlayerPath .. " stones in " .. string.format("%.1f", traceTime) .. "s")
 
-	-- Check if path complete
 	if #MeditationState.PlayerPath >= #MeditationState.CurrentPath then
-		InfoFrame.StateLabel.Text = "FLOW COMPLETE!"
+		InfoFrame.StateLabel.Text = "? FLOW COMPLETE!"
+		InfoFrame.StateLabel.TextColor3 = Color3.fromRGB(100, 255, 150)
 		task.wait(0.5)
 		submitFlow()
 	else
-		-- Incomplete path
-		InfoFrame.StateLabel.Text = "INCOMPLETE - TRY AGAIN"
-		InfoFrame.StateLabel.TextColor3 = MeditationConfig.Colors.Incorrect
+		InfoFrame.StateLabel.Text = "? INCOMPLETE - TRY AGAIN"
+		InfoFrame.StateLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
 
-		-- Reset after short delay
 		task.wait(1)
 		if not MeditationState.IsShowingFlow and MeditationState.IsMeditating then
 			MeditationState.PlayerPath = {}
 			MeditationState.TracedStones = {}
-			InfoFrame.StateLabel.Text = "RECREATE THE FLOW"
-			InfoFrame.StateLabel.TextColor3 = MeditationConfig.Colors.Chi.Gold
-			InfoFrame.ProgressLabel.Text = "Flow Progress: 0 / " .. #MeditationState.CurrentPath
+			InfoFrame.StateLabel.Text = "?? RECREATE THE FLOW ??"
+			InfoFrame.StateLabel.TextColor3 = Color3.fromRGB(255, 200, 50)
+			InfoFrame.ProgressLabel.Text = "Progress: 0 / " .. #MeditationState.CurrentPath
 		end
 	end
 end
 
--- Submit the player's chi flow
 function submitFlow()
 	MeditationState.IsMeditating = false
-	InfoFrame.StateLabel.Text = "HARMONIZING..."
+	InfoFrame.StateLabel.Text = "? HARMONIZING..."
 	InfoFrame.StateLabel.TextColor3 = MeditationConfig.Colors.TextSecondary
 
-	-- Send to server
 	SubmitFlowEvent:FireServer(MeditationState.PlayerPath)
 end
 
--- Handle meditation begin
+-- ============================================================================
+-- EVENT HANDLERS
+-- ============================================================================
+
 BeginMeditationEvent.OnClientEvent:Connect(function(data)
 	MeditationState.IsMeditating = true
 	MeditationState.CurrentLevel = data.Level
 	MeditationState.CurrentPath = data.ChiPath
 	MeditationState.CurrentDifficulty = data.Difficulty
 
-	-- Update UI
 	smoothHide(MenuFrame)
 	smoothHide(ResultFrame)
 	smoothShow(MeditationFrame)
 
 	local discipline = data.Difficulty.Discipline
 	InfoFrame.DisciplineLabel.Text = discipline.Name
-	-- Capitalize chi name to match Colors.Chi table
 	local chiName = discipline.Chi:sub(1, 1):upper() .. discipline.Chi:sub(2)
 	InfoFrame.DisciplineLabel.TextColor3 = MeditationConfig.Colors.Chi[chiName] or MeditationConfig.Colors.Chi.White
 	InfoFrame.LevelLabel.Text = "Level " .. data.Level
-	InfoFrame.PathLabel.Text = "Path Length: " .. data.Difficulty.PathLength
-	InfoFrame.ProgressLabel.Text = "Flow Progress: 0 / " .. #data.ChiPath
+	InfoFrame.PathLabel.Text = "Path: " .. data.Difficulty.PathLength
+	InfoFrame.ProgressLabel.Text = "Progress: 0 / " .. #data.ChiPath
 	InfoFrame.WisdomLabel.Text = data.Wisdom
 
-	-- Begin chi flow visualization
 	task.wait(0.5)
 	local chiColor = MeditationConfig.GetChiColor(data.Level)
 	showChiFlow(data.ChiPath, data.Difficulty.FlowTime, chiColor)
 end)
 
--- Handle enlightenment (results)
 EnlightenmentEvent.OnClientEvent:Connect(function(data)
 	if data.Success then
-		-- Harmony achieved!
 		if Sounds.Harmony then
 			Sounds.Harmony:Play()
 		end
 
-		InfoFrame.StateLabel.Text = data.PerfectFlow and "PERFECT HARMONY!" or "HARMONY ACHIEVED"
-		InfoFrame.StateLabel.TextColor3 = MeditationConfig.Colors.Correct
+		InfoFrame.StateLabel.Text = data.PerfectFlow and "?? PERFECT HARMONY! ??" or "? HARMONY ACHIEVED ?"
+		InfoFrame.StateLabel.TextColor3 = Color3.fromRGB(100, 255, 150)
 
-		-- Show enlightenment gain
+		-- Spectacular enlightenment popup
 		local enlightenmentPopup = InfoFrame.EnlightenmentPopup
 		local popupText = "+" .. data.Enlightenment .. " Enlightenment"
 		if data.Mindful then
-			popupText ..= "\n✨ Mindful Bonus"
+			popupText ..= "\n? Mindful Bonus"
 		end
 		if data.PerfectFlow then
-			popupText ..= "\n🔥 Perfect Flow!"
+			popupText ..= "\n?? PERFECT FLOW!"
 		end
 
 		enlightenmentPopup.Text = popupText
@@ -492,23 +633,26 @@ EnlightenmentEvent.OnClientEvent:Connect(function(data)
 		enlightenmentPopup.TextTransparency = 1
 		enlightenmentPopup.Position = UDim2.new(0.5, 0, 0.5, 0)
 
-		local popupTween = TweenService:Create(enlightenmentPopup, TweenInfo.new(0.6, Enum.EasingStyle.Back), {
+		-- Create explosion effect
+		createExplosionEffect(enlightenmentPopup, Color3.fromRGB(255, 215, 0))
+
+		local popupTween = TweenService:Create(enlightenmentPopup, TweenInfo.new(0.8, Enum.EasingStyle.Back, Enum.EasingDirection.Out), {
 			TextTransparency = 0,
-			Position = UDim2.new(0.5, 0, 0.35, 0)
+			Position = UDim2.new(0.5, 0, 0.3, 0),
+			TextStrokeTransparency = 0
 		})
 		popupTween:Play()
 
-		-- Wisdom quote
 		InfoFrame.WisdomLabel.Text = data.Wisdom
 
 		task.wait(3)
 
-		-- Fade out popup
-		TweenService:Create(enlightenmentPopup, TweenInfo.new(0.4), {
-			TextTransparency = 1
+		TweenService:Create(enlightenmentPopup, TweenInfo.new(0.5), {
+			TextTransparency = 1,
+			TextStrokeTransparency = 1
 		}):Play()
 
-		-- Setup next level
+		-- Continue to next level
 		MeditationState.CurrentLevel = data.Level
 		MeditationState.CurrentPath = data.NextPath
 		MeditationState.CurrentDifficulty = data.NextDifficulty
@@ -516,11 +660,10 @@ EnlightenmentEvent.OnClientEvent:Connect(function(data)
 
 		local discipline = data.NextDifficulty.Discipline
 		InfoFrame.DisciplineLabel.Text = discipline.Name
-		-- Capitalize chi name to match Colors.Chi table
 		local chiName = discipline.Chi:sub(1, 1):upper() .. discipline.Chi:sub(2)
 		InfoFrame.DisciplineLabel.TextColor3 = MeditationConfig.Colors.Chi[chiName] or MeditationConfig.Colors.Chi.White
 		InfoFrame.LevelLabel.Text = "Level " .. data.Level
-		InfoFrame.PathLabel.Text = "Path Length: " .. data.NextDifficulty.PathLength
+		InfoFrame.PathLabel.Text = "Path: " .. data.NextDifficulty.PathLength
 		InfoFrame.HarmonyLabel.Text = "Harmony: x" .. data.Harmony
 		InfoFrame.ChiLabel.Text = "Energy: " .. data.Chi .. "%"
 
@@ -529,20 +672,18 @@ EnlightenmentEvent.OnClientEvent:Connect(function(data)
 		showChiFlow(data.NextPath, data.NextDifficulty.FlowTime, chiColor)
 
 	else
-		-- Flow disrupted
 		if Sounds.Disruption then
 			Sounds.Disruption:Play()
 		end
 
 		MeditationState.IsMeditating = false
 
-		InfoFrame.StateLabel.Text = "FLOW DISRUPTED"
-		InfoFrame.StateLabel.TextColor3 = MeditationConfig.Colors.Incorrect
+		InfoFrame.StateLabel.Text = "?? FLOW DISRUPTED"
+		InfoFrame.StateLabel.TextColor3 = Color3.fromRGB(255, 100, 100)
 		InfoFrame.WisdomLabel.Text = data.Wisdom
 
 		task.wait(3)
 
-		-- Show results
 		smoothHide(MeditationFrame)
 
 		local discipline = MeditationConfig.GetDiscipline(data.FinalLevel)
@@ -573,7 +714,6 @@ MenuFrame.CloseMenuButton.Activated:Connect(function()
 end)
 
 MeditationFrame.ExitMeditationButton.Activated:Connect(function()
-	-- Exit meditation early
 	MeditationState.IsMeditating = false
 	MeditationState.IsShowingFlow = false
 	smoothHide(MeditationFrame)
@@ -590,6 +730,5 @@ end)
 
 -- Initialize
 createMandalaGrid()
--- Don't show menu automatically - player clicks button to open
 
-print("🧘 Meditation & Martial Arts Training - Client Ready")
+print("?? ENHANCED Meditation Controller - Ready with SPECTACULAR effects!")

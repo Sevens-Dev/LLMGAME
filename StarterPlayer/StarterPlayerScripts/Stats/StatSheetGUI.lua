@@ -1,9 +1,9 @@
 -- StatSheetGUI
 -- Place this LocalScript in StarterPlayer > StarterPlayerScripts
--- Creates a detailed stat sheet with allocation buttons
+-- Read-only stat sheet showing stats, derived values, and individual stat XP progress
+-- Stat allocation is admin-only via chat commands
 
 local Players = game:GetService("Players")
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 
@@ -13,32 +13,25 @@ local playerGui = player:WaitForChild("PlayerGui")
 -- Wait for stats
 local stats = player:WaitForChild("Stats", 10)
 local leaderstats = player:WaitForChild("leaderstats", 10)
+local statProgress = player:WaitForChild("StatProgress", 10)
 
 if not stats or not leaderstats then
 	warn("Stats not found - cannot create stat sheet")
 	return
 end
 
--- Wait for StatRemote
-local statRemote = ReplicatedStorage:WaitForChild("StatRemote", 10)
-if not statRemote then
-	warn("StatRemote not found")
-	return
-end
-
--- Get all stat values
+-- Core values
 local level = leaderstats:WaitForChild("Level", 5)
 local xp = stats:WaitForChild("XP", 5)
 local xpRequired = stats:WaitForChild("XPRequired", 5)
 
--- Primary Stats
+-- Primary stats
 local strength = stats:WaitForChild("Strength", 5)
 local dexterity = stats:WaitForChild("Dexterity", 5)
 local constitution = stats:WaitForChild("Constitution", 5)
 local intelligence = stats:WaitForChild("Intelligence", 5)
-local statPoints = stats:WaitForChild("StatPoints", 5)
 
--- Derived Stats
+-- Derived stats
 local maxHP = stats:WaitForChild("MaxHP", 5)
 local currentHP = stats:WaitForChild("CurrentHP", 5)
 local maxStamina = stats:WaitForChild("MaxStamina", 5)
@@ -48,36 +41,62 @@ local defense = stats:WaitForChild("Defense", 5)
 local spellRange = stats:WaitForChild("SpellRange", 5)
 local wordCount = stats:WaitForChild("WordCount", 5)
 
+-- Stat XP progress values
+local strXP, strXPReq, dexXP, dexXPReq, conXP, conXPReq, intXP, intXPReq
+if statProgress then
+	strXP = statProgress:WaitForChild("StrengthXP", 5)
+	strXPReq = statProgress:WaitForChild("StrengthXPRequired", 5)
+	dexXP = statProgress:WaitForChild("DexterityXP", 5)
+	dexXPReq = statProgress:WaitForChild("DexterityXPRequired", 5)
+	conXP = statProgress:WaitForChild("ConstitutionXP", 5)
+	conXPReq = statProgress:WaitForChild("ConstitutionXPRequired", 5)
+	intXP = statProgress:WaitForChild("IntelligenceXP", 5)
+	intXPReq = statProgress:WaitForChild("IntelligenceXPRequired", 5)
+end
+
 -- ============================================================================
 -- CONFIGURATION
 -- ============================================================================
 local CONFIG = {
-	-- Toggle Key
-	ToggleKey = Enum.KeyCode.C, -- Press 'C' to open/close
+	ToggleKey = Enum.KeyCode.C,
 
-	-- Colors - Dark fantasy RPG theme
+	-- Colors
 	BackgroundColor = Color3.fromRGB(20, 18, 25),
 	HeaderColor = Color3.fromRGB(40, 35, 50),
 	PanelColor = Color3.fromRGB(30, 27, 38),
-	AccentColor = Color3.fromRGB(180, 140, 230), -- Purple accent
+	AccentColor = Color3.fromRGB(180, 140, 230),
 	TextColor = Color3.fromRGB(220, 220, 230),
 	SubTextColor = Color3.fromRGB(150, 150, 160),
 	ButtonColor = Color3.fromRGB(60, 50, 80),
 	ButtonHoverColor = Color3.fromRGB(80, 70, 100),
 
 	-- Stat Colors
-	StrengthColor = Color3.fromRGB(220, 80, 80), -- Red
-	DexterityColor = Color3.fromRGB(80, 200, 120), -- Green
-	ConstitutionColor = Color3.fromRGB(100, 150, 220), -- Blue
-	IntelligenceColor = Color3.fromRGB(200, 120, 220), -- Purple
+	StrengthColor = Color3.fromRGB(220, 80, 80),
+	DexterityColor = Color3.fromRGB(80, 200, 120),
+	ConstitutionColor = Color3.fromRGB(100, 150, 220),
+	IntelligenceColor = Color3.fromRGB(200, 120, 220),
 
-	-- Sizes
-	PanelWidth = 450,
-	PanelHeight = 600,
+	-- XP Bar Colors
+	StrengthXPColor = Color3.fromRGB(180, 50, 50),
+	DexterityXPColor = Color3.fromRGB(50, 160, 90),
+	ConstitutionXPColor = Color3.fromRGB(70, 110, 190),
+	IntelligenceXPColor = Color3.fromRGB(160, 80, 190),
+	XPBarBackground = Color3.fromRGB(20, 18, 28),
+
+	PanelWidth = 480,
+	PanelHeight = 650,
 }
 
+-- Level bonus per level (must match PlayerStatsManager CONFIG.LevelStatBonus)
+local LEVEL_STAT_BONUS = 0.5
+
+local function getEffectiveStatDisplay(rawValue)
+	local bonus = level.Value * LEVEL_STAT_BONUS
+	return (rawValue + bonus) .. " (base " .. rawValue .. ")"
+end
+
 -- ============================================================================
--- CREATE GUI STRUCTURE
+-- CREATE GUI
 -- ============================================================================
 
 local screenGui = Instance.new("ScreenGui")
@@ -86,7 +105,6 @@ screenGui.ResetOnSpawn = false
 screenGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 screenGui.Parent = playerGui
 
--- Main Panel (hidden by default)
 local mainPanel = Instance.new("Frame")
 mainPanel.Name = "MainPanel"
 mainPanel.Size = UDim2.new(0, CONFIG.PanelWidth, 0, CONFIG.PanelHeight)
@@ -96,7 +114,6 @@ mainPanel.BorderSizePixel = 0
 mainPanel.Visible = false
 mainPanel.Parent = screenGui
 
--- Add subtle border glow
 local mainPanelStroke = Instance.new("UIStroke")
 mainPanelStroke.Color = CONFIG.AccentColor
 mainPanelStroke.Thickness = 2
@@ -111,7 +128,6 @@ mainPanelCorner.Parent = mainPanel
 local header = Instance.new("Frame")
 header.Name = "Header"
 header.Size = UDim2.new(1, 0, 0, 60)
-header.Position = UDim2.new(0, 0, 0, 0)
 header.BackgroundColor3 = CONFIG.HeaderColor
 header.BorderSizePixel = 0
 header.Parent = mainPanel
@@ -120,107 +136,96 @@ local headerCorner = Instance.new("UICorner")
 headerCorner.CornerRadius = UDim.new(0, 12)
 headerCorner.Parent = header
 
--- Title
 local title = Instance.new("TextLabel")
-title.Name = "Title"
-title.Size = UDim2.new(1, -20, 0, 30)
-title.Position = UDim2.new(0, 10, 0, 5)
+title.Size = UDim2.new(1, -70, 0, 30)
+title.Position = UDim2.new(0, 15, 0, 5)
 title.BackgroundTransparency = 1
 title.Text = "CHARACTER STATS"
 title.TextColor3 = CONFIG.AccentColor
 title.Font = Enum.Font.GothamBold
-title.TextSize = 24
+title.TextSize = 22
 title.TextXAlignment = Enum.TextXAlignment.Left
 title.Parent = header
 
--- Level & XP Display
 local levelXPText = Instance.new("TextLabel")
 levelXPText.Name = "LevelXPText"
-levelXPText.Size = UDim2.new(1, -20, 0, 20)
-levelXPText.Position = UDim2.new(0, 10, 0, 35)
+levelXPText.Size = UDim2.new(1, -70, 0, 20)
+levelXPText.Position = UDim2.new(0, 15, 0, 35)
 levelXPText.BackgroundTransparency = 1
-levelXPText.Text = "Level " .. level.Value .. " | " .. xp.Value .. "/" .. xpRequired.Value .. " XP"
+levelXPText.Text = "Level " .. level.Value .. "  |  Combat XP: " .. xp.Value .. " / " .. xpRequired.Value
 levelXPText.TextColor3 = CONFIG.SubTextColor
 levelXPText.Font = Enum.Font.Gotham
-levelXPText.TextSize = 14
+levelXPText.TextSize = 13
 levelXPText.TextXAlignment = Enum.TextXAlignment.Left
 levelXPText.Parent = header
 
--- Close Button
 local closeButton = Instance.new("TextButton")
 closeButton.Name = "CloseButton"
-closeButton.Size = UDim2.new(0, 40, 0, 40)
-closeButton.Position = UDim2.new(1, -50, 0, 10)
+closeButton.Size = UDim2.new(0, 38, 0, 38)
+closeButton.Position = UDim2.new(1, -48, 0, 11)
 closeButton.BackgroundColor3 = CONFIG.ButtonColor
 closeButton.BorderSizePixel = 0
-closeButton.Text = "X"
+closeButton.Text = "?"
 closeButton.TextColor3 = CONFIG.TextColor
 closeButton.Font = Enum.Font.GothamBold
-closeButton.TextSize = 20
+closeButton.TextSize = 18
 closeButton.Parent = header
 
-local closeButtonCorner = Instance.new("UICorner")
-closeButtonCorner.CornerRadius = UDim.new(0, 8)
-closeButtonCorner.Parent = closeButton
+local closeCorner = Instance.new("UICorner")
+closeCorner.CornerRadius = UDim.new(0, 8)
+closeCorner.Parent = closeButton
 
--- Content Area (scrolling)
+-- Scrollable content
 local contentFrame = Instance.new("ScrollingFrame")
 contentFrame.Name = "ContentFrame"
-contentFrame.Size = UDim2.new(1, -20, 1, -80)
-contentFrame.Position = UDim2.new(0, 10, 0, 70)
+contentFrame.Size = UDim2.new(1, -20, 1, -70)
+contentFrame.Position = UDim2.new(0, 10, 0, 65)
 contentFrame.BackgroundTransparency = 1
 contentFrame.BorderSizePixel = 0
-contentFrame.ScrollBarThickness = 6
+contentFrame.ScrollBarThickness = 5
 contentFrame.ScrollBarImageColor3 = CONFIG.AccentColor
-contentFrame.CanvasSize = UDim2.new(0, 0, 0, 800) -- Will adjust dynamically
+contentFrame.CanvasSize = UDim2.new(0, 0, 0, 900)
 contentFrame.Parent = mainPanel
 
--- Stat Points Display (prominent)
-local statPointsPanel = Instance.new("Frame")
-statPointsPanel.Name = "StatPointsPanel"
-statPointsPanel.Size = UDim2.new(1, 0, 0, 70)
-statPointsPanel.Position = UDim2.new(0, 0, 0, 0)
-statPointsPanel.BackgroundColor3 = CONFIG.PanelColor
-statPointsPanel.BorderSizePixel = 0
-statPointsPanel.Parent = contentFrame
-
-local statPointsPanelCorner = Instance.new("UICorner")
-statPointsPanelCorner.CornerRadius = UDim.new(0, 8)
-statPointsPanelCorner.Parent = statPointsPanel
-
-local statPointsLabel = Instance.new("TextLabel")
-statPointsLabel.Size = UDim2.new(1, -20, 0, 25)
-statPointsLabel.Position = UDim2.new(0, 10, 0, 10)
-statPointsLabel.BackgroundTransparency = 1
-statPointsLabel.Text = "Available Stat Points"
-statPointsLabel.TextColor3 = CONFIG.SubTextColor
-statPointsLabel.Font = Enum.Font.Gotham
-statPointsLabel.TextSize = 14
-statPointsLabel.TextXAlignment = Enum.TextXAlignment.Left
-statPointsLabel.Parent = statPointsPanel
-
-local statPointsValue = Instance.new("TextLabel")
-statPointsValue.Name = "StatPointsValue"
-statPointsValue.Size = UDim2.new(1, -20, 0, 35)
-statPointsValue.Position = UDim2.new(0, 10, 0, 30)
-statPointsValue.BackgroundTransparency = 1
-statPointsValue.Text = tostring(statPoints.Value)
-statPointsValue.TextColor3 = CONFIG.AccentColor
-statPointsValue.Font = Enum.Font.GothamBold
-statPointsValue.TextSize = 28
-statPointsValue.TextXAlignment = Enum.TextXAlignment.Left
-statPointsValue.Parent = statPointsPanel
-
 -- ============================================================================
--- STAT ROW CREATION FUNCTION
+-- LEVEL BONUS NOTICE
 -- ============================================================================
 
-local yPos = 90 -- Starting Y position (after stat points panel)
+local bonusNotice = Instance.new("Frame")
+bonusNotice.Name = "BonusNotice"
+bonusNotice.Size = UDim2.new(1, 0, 0, 40)
+bonusNotice.Position = UDim2.new(0, 0, 0, 0)
+bonusNotice.BackgroundColor3 = Color3.fromRGB(40, 35, 55)
+bonusNotice.BorderSizePixel = 0
+bonusNotice.Parent = contentFrame
 
-local function createStatRow(statName, statValue, color, description, yPosition)
+local bonusCorner = Instance.new("UICorner")
+bonusCorner.CornerRadius = UDim.new(0, 8)
+bonusCorner.Parent = bonusNotice
+
+local bonusText = Instance.new("TextLabel")
+bonusText.Name = "BonusText"
+bonusText.Size = UDim2.new(1, -15, 1, 0)
+bonusText.Position = UDim2.new(0, 15, 0, 0)
+bonusText.BackgroundTransparency = 1
+bonusText.Text = "? Level Bonus: +" .. (level.Value * LEVEL_STAT_BONUS) .. " to all stats  |  Train minigames to raise individual stats"
+bonusText.TextColor3 = CONFIG.AccentColor
+bonusText.Font = Enum.Font.Gotham
+bonusText.TextSize = 12
+bonusText.TextXAlignment = Enum.TextXAlignment.Left
+bonusText.TextWrapped = true
+bonusText.Parent = bonusNotice
+
+-- ============================================================================
+-- STAT ROW WITH XP BAR (read-only, no allocation button)
+-- ============================================================================
+
+local yPos = 50
+
+local function createStatSection(statName, statValue, xpValue, xpReqValue, color, xpBarColor, description, yPosition)
 	local rowFrame = Instance.new("Frame")
 	rowFrame.Name = statName .. "Row"
-	rowFrame.Size = UDim2.new(1, 0, 0, 90)
+	rowFrame.Size = UDim2.new(1, 0, 0, 100)
 	rowFrame.Position = UDim2.new(0, 0, 0, yPosition)
 	rowFrame.BackgroundColor3 = CONFIG.PanelColor
 	rowFrame.BorderSizePixel = 0
@@ -230,35 +235,48 @@ local function createStatRow(statName, statValue, color, description, yPosition)
 	rowCorner.CornerRadius = UDim.new(0, 8)
 	rowCorner.Parent = rowFrame
 
-	-- Stat name (top left)
+	-- Colored left accent bar
+	local accentBar = Instance.new("Frame")
+	accentBar.Size = UDim2.new(0, 4, 1, -16)
+	accentBar.Position = UDim2.new(0, 0, 0, 8)
+	accentBar.BackgroundColor3 = color
+	accentBar.BorderSizePixel = 0
+	accentBar.Parent = rowFrame
+
+	local accentCorner = Instance.new("UICorner")
+	accentCorner.CornerRadius = UDim.new(1, 0)
+	accentCorner.Parent = accentBar
+
+	-- Stat name
 	local nameLabel = Instance.new("TextLabel")
-	nameLabel.Size = UDim2.new(0.6, 0, 0, 25)
-	nameLabel.Position = UDim2.new(0, 10, 0, 10)
+	nameLabel.Size = UDim2.new(0.55, 0, 0, 24)
+	nameLabel.Position = UDim2.new(0, 14, 0, 10)
 	nameLabel.BackgroundTransparency = 1
 	nameLabel.Text = statName
 	nameLabel.TextColor3 = color
 	nameLabel.Font = Enum.Font.GothamBold
-	nameLabel.TextSize = 16
+	nameLabel.TextSize = 15
 	nameLabel.TextXAlignment = Enum.TextXAlignment.Left
 	nameLabel.Parent = rowFrame
 
-	-- Current value (top right)
+	-- Raw value + effective value (top right)
 	local valueLabel = Instance.new("TextLabel")
 	valueLabel.Name = "ValueLabel"
-	valueLabel.Size = UDim2.new(0.4, -10, 0, 25)
-	valueLabel.Position = UDim2.new(0.6, 0, 0, 10)
+	valueLabel.Size = UDim2.new(0.45, -10, 0, 24)
+	valueLabel.Position = UDim2.new(0.55, 0, 0, 10)
 	valueLabel.BackgroundTransparency = 1
-	valueLabel.Text = tostring(statValue.Value)
+	valueLabel.Text = getEffectiveStatDisplay(statValue.Value)
 	valueLabel.TextColor3 = CONFIG.TextColor
 	valueLabel.Font = Enum.Font.GothamBold
-	valueLabel.TextSize = 20
+	valueLabel.TextSize = 13
 	valueLabel.TextXAlignment = Enum.TextXAlignment.Right
 	valueLabel.Parent = rowFrame
 
-	-- Description (below name)
+	-- Description
 	local descLabel = Instance.new("TextLabel")
-	descLabel.Size = UDim2.new(1, -20, 0, 25)
-	descLabel.Position = UDim2.new(0, 10, 0, 35)
+	descLabel.Name = "DescLabel"
+	descLabel.Size = UDim2.new(1, -18, 0, 20)
+	descLabel.Position = UDim2.new(0, 14, 0, 36)
 	descLabel.BackgroundTransparency = 1
 	descLabel.Text = description
 	descLabel.TextColor3 = CONFIG.SubTextColor
@@ -268,272 +286,259 @@ local function createStatRow(statName, statValue, color, description, yPosition)
 	descLabel.TextXAlignment = Enum.TextXAlignment.Left
 	descLabel.Parent = rowFrame
 
-	-- Add button (bottom right)
-	local addButton = Instance.new("TextButton")
-	addButton.Name = "AddButton"
-	addButton.Size = UDim2.new(0, 80, 0, 30)
-	addButton.Position = UDim2.new(1, -90, 1, -38)
-	addButton.BackgroundColor3 = CONFIG.ButtonColor
-	addButton.BorderSizePixel = 0
-	addButton.Text = "+ Add"
-	addButton.TextColor3 = CONFIG.TextColor
-	addButton.Font = Enum.Font.GothamBold
-	addButton.TextSize = 14
-	addButton.Parent = rowFrame
+	-- XP Bar background
+	local xpBarBG = Instance.new("Frame")
+	xpBarBG.Name = "XPBarBG"
+	xpBarBG.Size = UDim2.new(1, -18, 0, 14)
+	xpBarBG.Position = UDim2.new(0, 14, 0, 62)
+	xpBarBG.BackgroundColor3 = CONFIG.XPBarBackground
+	xpBarBG.BorderSizePixel = 0
+	xpBarBG.Parent = rowFrame
 
-	local addButtonCorner = Instance.new("UICorner")
-	addButtonCorner.CornerRadius = UDim.new(0, 6)
-	addButtonCorner.Parent = addButton
+	local xpBarBGCorner = Instance.new("UICorner")
+	xpBarBGCorner.CornerRadius = UDim.new(1, 0)
+	xpBarBGCorner.Parent = xpBarBG
 
-	-- Button hover effects
-	addButton.MouseEnter:Connect(function()
-		if statPoints.Value > 0 then
-			TweenService:Create(addButton, TweenInfo.new(0.1), {
-				BackgroundColor3 = CONFIG.ButtonHoverColor
-			}):Play()
-		end
-	end)
-
-	addButton.MouseLeave:Connect(function()
-		TweenService:Create(addButton, TweenInfo.new(0.1), {
-			BackgroundColor3 = CONFIG.ButtonColor
-		}):Play()
-	end)
-
-	-- Button click handler
-	addButton.MouseButton1Click:Connect(function()
-		if statPoints.Value > 0 then
-			-- Visual feedback
-			local originalSize = addButton.Size
-			TweenService:Create(addButton, TweenInfo.new(0.1), {
-				Size = UDim2.new(0, 75, 0, 28)
-			}):Play()
-			task.wait(0.1)
-			TweenService:Create(addButton, TweenInfo.new(0.1), {
-				Size = originalSize
-			}):Play()
-
-			-- Send request to server with proper command format
-			-- Convert "STRENGTH" to "AddStrength", "DEXTERITY" to "AddDexterity", etc.
-			local commandName = "Add" .. statName:sub(1,1) .. statName:sub(2):lower()
-			statRemote:FireServer(commandName, 1)
-		end
-	end)
-
-	-- Update button state when stat points change
-	statPoints.Changed:Connect(function()
-		if statPoints.Value > 0 then
-			addButton.BackgroundColor3 = CONFIG.ButtonColor
-			addButton.TextTransparency = 0
-		else
-			addButton.BackgroundColor3 = Color3.fromRGB(40, 35, 50)
-			addButton.TextTransparency = 0.5
-		end
-	end)
-
-	-- Initialize button state
-	if statPoints.Value <= 0 then
-		addButton.BackgroundColor3 = Color3.fromRGB(40, 35, 50)
-		addButton.TextTransparency = 0.5
+	-- XP Bar fill
+	local xpRatio = 0
+	if xpValue and xpReqValue and xpReqValue.Value > 0 then
+		xpRatio = math.clamp(xpValue.Value / xpReqValue.Value, 0, 1)
 	end
 
-	-- Update value when stat changes
+	local xpBarFill = Instance.new("Frame")
+	xpBarFill.Name = "XPBarFill"
+	xpBarFill.Size = UDim2.new(xpRatio, 0, 1, 0)
+	xpBarFill.BackgroundColor3 = xpBarColor
+	xpBarFill.BorderSizePixel = 0
+	xpBarFill.Parent = xpBarBG
+
+	local xpFillCorner = Instance.new("UICorner")
+	xpFillCorner.CornerRadius = UDim.new(1, 0)
+	xpFillCorner.Parent = xpBarFill
+
+	-- XP Text
+	local xpText = Instance.new("TextLabel")
+	xpText.Name = "XPText"
+	xpText.Size = UDim2.new(1, -18, 0, 14)
+	xpText.Position = UDim2.new(0, 14, 0, 80)
+	xpText.BackgroundTransparency = 1
+
+	if xpValue and xpReqValue then
+		xpText.Text = "Training XP: " .. xpValue.Value .. " / " .. xpReqValue.Value
+	else
+		xpText.Text = "Training XP: train via minigames"
+	end
+
+	xpText.TextColor3 = CONFIG.SubTextColor
+	xpText.Font = Enum.Font.Gotham
+	xpText.TextSize = 11
+	xpText.TextXAlignment = Enum.TextXAlignment.Left
+	xpText.Parent = rowFrame
+
+	-- Connect XP bar updates
+	if xpValue and xpReqValue then
+		local function updateXPBar()
+			local ratio = math.clamp(xpValue.Value / math.max(xpReqValue.Value, 1), 0, 1)
+			TweenService:Create(xpBarFill, TweenInfo.new(0.3, Enum.EasingStyle.Quad), {
+				Size = UDim2.new(ratio, 0, 1, 0)
+			}):Play()
+			xpText.Text = "Training XP: " .. xpValue.Value .. " / " .. xpReqValue.Value
+		end
+		xpValue.Changed:Connect(updateXPBar)
+		xpReqValue.Changed:Connect(updateXPBar)
+	end
+
+	-- Update value label when stat changes
 	statValue.Changed:Connect(function()
-		valueLabel.Text = tostring(statValue.Value)
+		valueLabel.Text = getEffectiveStatDisplay(statValue.Value)
 	end)
 
-	return rowFrame, valueLabel, descLabel
+	return rowFrame, descLabel
 end
 
 -- ============================================================================
--- PRIMARY STATS
+-- PRIMARY STATS SECTION
 -- ============================================================================
 
-local primaryStatsTitle = Instance.new("TextLabel")
-primaryStatsTitle.Size = UDim2.new(1, 0, 0, 30)
-primaryStatsTitle.Position = UDim2.new(0, 0, 0, yPos)
-primaryStatsTitle.BackgroundTransparency = 1
-primaryStatsTitle.Text = "PRIMARY STATS"
-primaryStatsTitle.TextColor3 = CONFIG.AccentColor
-primaryStatsTitle.Font = Enum.Font.GothamBold
-primaryStatsTitle.TextSize = 16
-primaryStatsTitle.TextXAlignment = Enum.TextXAlignment.Left
-primaryStatsTitle.Parent = contentFrame
-yPos = yPos + 40
+local primaryTitle = Instance.new("TextLabel")
+primaryTitle.Size = UDim2.new(1, 0, 0, 28)
+primaryTitle.Position = UDim2.new(0, 5, 0, yPos)
+primaryTitle.BackgroundTransparency = 1
+primaryTitle.Text = "PRIMARY STATS"
+primaryTitle.TextColor3 = CONFIG.AccentColor
+primaryTitle.Font = Enum.Font.GothamBold
+primaryTitle.TextSize = 14
+primaryTitle.TextXAlignment = Enum.TextXAlignment.Left
+primaryTitle.Parent = contentFrame
+yPos = yPos + 35
 
--- Create stat rows
-local _, strValueLabel, strDescLabel = createStatRow(
-	"STRENGTH",
-	strength,
-	CONFIG.StrengthColor,
-	"Physical damage - Currently: " .. (5 + strength.Value * 2) .. " damage",
+local _, strDesc = createStatSection(
+	"STRENGTH", strength,
+	strXP, strXPReq,
+	CONFIG.StrengthColor, CONFIG.StrengthXPColor,
+	"Physical damage — currently " .. (5 + strength.Value * 2) .. " dmg  |  Train: Swordsmanship",
 	yPos
 )
-yPos = yPos + 100
+yPos = yPos + 110
 
-local _, dexValueLabel, dexDescLabel = createStatRow(
-	"DEXTERITY",
-	dexterity,
-	CONFIG.DexterityColor,
-	"Movement speed - Currently: " .. math.floor(speed.Value) .. " speed",
+local _, dexDesc = createStatSection(
+	"DEXTERITY", dexterity,
+	dexXP, dexXPReq,
+	CONFIG.DexterityColor, CONFIG.DexterityXPColor,
+	"Movement speed — currently " .. math.floor(speed.Value) .. " speed  |  Train: Clicker",
 	yPos
 )
-yPos = yPos + 100
+yPos = yPos + 110
 
-local _, conValueLabel, conDescLabel = createStatRow(
-	"CONSTITUTION",
-	constitution,
-	CONFIG.ConstitutionColor,
-	"HP and Stamina - Currently: " .. math.floor(maxHP.Value) .. " HP, " .. math.floor(maxStamina.Value) .. " STA",
+local _, conDesc = createStatSection(
+	"CONSTITUTION", constitution,
+	conXP, conXPReq,
+	CONFIG.ConstitutionColor, CONFIG.ConstitutionXPColor,
+	"HP & Stamina — currently " .. math.floor(maxHP.Value) .. " HP, " .. math.floor(maxStamina.Value) .. " STA  |  Train: Endurance",
 	yPos
 )
-yPos = yPos + 100
+yPos = yPos + 110
 
-local _, intValueLabel, intDescLabel = createStatRow(
-	"INTELLIGENCE",
-	intelligence,
-	CONFIG.IntelligenceColor,
-	"Spell range & words - Currently: " .. spellRange.Value .. " range, " .. wordCount.Value .. " words",
+local _, intDesc = createStatSection(
+	"INTELLIGENCE", intelligence,
+	intXP, intXPReq,
+	CONFIG.IntelligenceColor, CONFIG.IntelligenceXPColor,
+	"Spell range & words — currently " .. spellRange.Value .. " range, " .. wordCount.Value .. " words  |  Train: Meditation",
 	yPos
 )
-yPos = yPos + 100
+yPos = yPos + 110
 
 -- Divider
 local divider = Instance.new("Frame")
-divider.Size = UDim2.new(1, 0, 0, 2)
+divider.Size = UDim2.new(1, 0, 0, 1)
 divider.Position = UDim2.new(0, 0, 0, yPos)
 divider.BackgroundColor3 = CONFIG.HeaderColor
 divider.BorderSizePixel = 0
 divider.Parent = contentFrame
-yPos = yPos + 20
+yPos = yPos + 15
 
 -- ============================================================================
--- DERIVED STATS DISPLAY (Read-only)
+-- DERIVED STATS (read-only display)
 -- ============================================================================
 
-local derivedStatsTitle = Instance.new("TextLabel")
-derivedStatsTitle.Size = UDim2.new(1, 0, 0, 30)
-derivedStatsTitle.Position = UDim2.new(0, 0, 0, yPos)
-derivedStatsTitle.BackgroundTransparency = 1
-derivedStatsTitle.Text = "DERIVED STATS"
-derivedStatsTitle.TextColor3 = CONFIG.AccentColor
-derivedStatsTitle.Font = Enum.Font.GothamBold
-derivedStatsTitle.TextSize = 16
-derivedStatsTitle.TextXAlignment = Enum.TextXAlignment.Left
-derivedStatsTitle.Parent = contentFrame
-yPos = yPos + 40
+local derivedTitle = Instance.new("TextLabel")
+derivedTitle.Size = UDim2.new(1, 0, 0, 28)
+derivedTitle.Position = UDim2.new(0, 5, 0, yPos)
+derivedTitle.BackgroundTransparency = 1
+derivedTitle.Text = "DERIVED STATS"
+derivedTitle.TextColor3 = CONFIG.AccentColor
+derivedTitle.Font = Enum.Font.GothamBold
+derivedTitle.TextSize = 14
+derivedTitle.TextXAlignment = Enum.TextXAlignment.Left
+derivedTitle.Parent = contentFrame
+yPos = yPos + 35
 
-local function createDerivedStatRow(name, valueGetter, yPosition)
-	local rowFrame = Instance.new("Frame")
-	rowFrame.Name = name .. "DerivedRow"
-	rowFrame.Size = UDim2.new(1, 0, 0, 35)
-	rowFrame.Position = UDim2.new(0, 0, 0, yPosition)
-	rowFrame.BackgroundTransparency = 1
-	rowFrame.Parent = contentFrame
+local function createDerivedRow(name, valueGetter, yPosition)
+	local row = Instance.new("Frame")
+	row.Size = UDim2.new(1, 0, 0, 32)
+	row.Position = UDim2.new(0, 0, 0, yPosition)
+	row.BackgroundTransparency = 1
+	row.Parent = contentFrame
 
-	local nameLabel = Instance.new("TextLabel")
-	nameLabel.Size = UDim2.new(0.5, 0, 1, 0)
-	nameLabel.Position = UDim2.new(0, 10, 0, 0)
-	nameLabel.BackgroundTransparency = 1
-	nameLabel.Text = name
-	nameLabel.TextColor3 = CONFIG.SubTextColor
-	nameLabel.Font = Enum.Font.Gotham
-	nameLabel.TextSize = 14
-	nameLabel.TextXAlignment = Enum.TextXAlignment.Left
-	nameLabel.Parent = rowFrame
+	local nameLbl = Instance.new("TextLabel")
+	nameLbl.Size = UDim2.new(0.55, 0, 1, 0)
+	nameLbl.Position = UDim2.new(0, 10, 0, 0)
+	nameLbl.BackgroundTransparency = 1
+	nameLbl.Text = name
+	nameLbl.TextColor3 = CONFIG.SubTextColor
+	nameLbl.Font = Enum.Font.Gotham
+	nameLbl.TextSize = 13
+	nameLbl.TextXAlignment = Enum.TextXAlignment.Left
+	nameLbl.Parent = row
 
-	local valueLabel = Instance.new("TextLabel")
-	valueLabel.Name = "ValueLabel"
-	valueLabel.Size = UDim2.new(0.5, -10, 1, 0)
-	valueLabel.Position = UDim2.new(0.5, 0, 0, 0)
-	valueLabel.BackgroundTransparency = 1
-	valueLabel.Text = valueGetter()
-	valueLabel.TextColor3 = CONFIG.TextColor
-	valueLabel.Font = Enum.Font.GothamBold
-	valueLabel.TextSize = 14
-	valueLabel.TextXAlignment = Enum.TextXAlignment.Right
-	valueLabel.Parent = rowFrame
+	local valLbl = Instance.new("TextLabel")
+	valLbl.Name = "ValueLabel"
+	valLbl.Size = UDim2.new(0.45, -10, 1, 0)
+	valLbl.Position = UDim2.new(0.55, 0, 0, 0)
+	valLbl.BackgroundTransparency = 1
+	valLbl.Text = valueGetter()
+	valLbl.TextColor3 = CONFIG.TextColor
+	valLbl.Font = Enum.Font.GothamBold
+	valLbl.TextSize = 13
+	valLbl.TextXAlignment = Enum.TextXAlignment.Right
+	valLbl.Parent = row
 
-	return rowFrame, valueLabel
+	return row, valLbl
 end
 
-local _, physDamageLabel = createDerivedStatRow("Physical Damage", function()
+local _, physDmgLabel = createDerivedRow("Physical Damage", function()
 	return tostring(5 + strength.Value * 2)
 end, yPos)
-yPos = yPos + 35
+yPos = yPos + 32
 
-local _, speedLabel = createDerivedStatRow("Speed", function()
+local _, speedLabel = createDerivedRow("Speed", function()
 	return math.floor(speed.Value) .. " / 80"
 end, yPos)
-yPos = yPos + 35
+yPos = yPos + 32
 
-local _, defenseLabel = createDerivedStatRow("Defense", function()
+local _, defLabel = createDerivedRow("Defense", function()
 	return tostring(defense.Value)
 end, yPos)
-yPos = yPos + 35
+yPos = yPos + 32
 
-local _, spellRangeLabel = createDerivedStatRow("Spell Range", function()
+local _, rangeLabel = createDerivedRow("Spell Range", function()
 	return tostring(spellRange.Value) .. " studs"
 end, yPos)
-yPos = yPos + 35
+yPos = yPos + 32
 
-local _, wordCountLabel = createDerivedStatRow("Spell Words", function()
+local _, wordsLabel = createDerivedRow("Spell Words", function()
 	return tostring(wordCount.Value) .. " words"
 end, yPos)
-yPos = yPos + 35
+yPos = yPos + 40
 
--- Update canvas size
+-- Update canvas height
 contentFrame.CanvasSize = UDim2.new(0, 0, 0, yPos + 20)
 
 -- ============================================================================
--- UPDATE FUNCTIONS
+-- UPDATE LISTENERS
 -- ============================================================================
 
-local function updateDerivedStats()
-	-- Update derived stat labels
-	physDamageLabel.Text = tostring(5 + strength.Value * 2)
-	speedLabel.Text = math.floor(speed.Value) .. " / 80"
-	defenseLabel.Text = tostring(defense.Value)
-	spellRangeLabel.Text = tostring(spellRange.Value) .. " studs"
-	wordCountLabel.Text = tostring(wordCount.Value) .. " words"
+local function refreshAll()
+	local strRow = contentFrame:FindFirstChild("STRENGTHRow")
+	local dexRow = contentFrame:FindFirstChild("DEXTERITYRow")
+	local conRow = contentFrame:FindFirstChild("CONSTITUTIONRow")
+	local intRow = contentFrame:FindFirstChild("INTELLIGENCERow")
 
-	-- Update descriptions in primary stat rows
-	strDescLabel.Text = "Physical damage - Currently: " .. (5 + strength.Value * 2) .. " damage"
-	dexDescLabel.Text = "Movement speed - Currently: " .. math.floor(speed.Value) .. " speed"
-	conDescLabel.Text = "HP and Stamina - Currently: " .. math.floor(maxHP.Value) .. " HP, " .. math.floor(maxStamina.Value) .. " STA"
-	intDescLabel.Text = "Spell range & words - Currently: " .. spellRange.Value .. " range, " .. wordCount.Value .. " words"
+	if strRow then strRow:FindFirstChild("ValueLabel").Text = getEffectiveStatDisplay(strength.Value) end
+	if dexRow then dexRow:FindFirstChild("ValueLabel").Text = getEffectiveStatDisplay(dexterity.Value) end
+	if conRow then conRow:FindFirstChild("ValueLabel").Text = getEffectiveStatDisplay(constitution.Value) end
+	if intRow then intRow:FindFirstChild("ValueLabel").Text = getEffectiveStatDisplay(intelligence.Value) end
+	physDmgLabel.Text = tostring(5 + strength.Value * 2)
+	speedLabel.Text = math.floor(speed.Value) .. " / 80"
+	defLabel.Text = tostring(defense.Value)
+	rangeLabel.Text = tostring(spellRange.Value) .. " studs"
+	wordsLabel.Text = tostring(wordCount.Value) .. " words"
+
+	strDesc.Text = "Physical damage — currently " .. (5 + strength.Value * 2) .. " dmg  |  Train: Swordsmanship"
+	dexDesc.Text = "Movement speed — currently " .. math.floor(speed.Value) .. " speed  |  Train: Clicker"
+	conDesc.Text = "HP & Stamina — currently " .. math.floor(maxHP.Value) .. " HP, " .. math.floor(maxStamina.Value) .. " STA  |  Train: Endurance"
+	intDesc.Text = "Spell range & words — currently " .. spellRange.Value .. " range, " .. wordCount.Value .. " words  |  Train: Meditation"
+
+	bonusText.Text = "? Level Bonus: +" .. (level.Value * LEVEL_STAT_BONUS) .. " to all stats  |  Train minigames to raise individual stats"
+	levelXPText.Text = "Level " .. level.Value .. "  |  Combat XP: " .. xp.Value .. " / " .. xpRequired.Value
 end
 
--- Connect to stat changes
-strength.Changed:Connect(updateDerivedStats)
-dexterity.Changed:Connect(updateDerivedStats)
-constitution.Changed:Connect(updateDerivedStats)
-intelligence.Changed:Connect(updateDerivedStats)
-speed.Changed:Connect(updateDerivedStats)
-defense.Changed:Connect(updateDerivedStats)
-spellRange.Changed:Connect(updateDerivedStats)
-wordCount.Changed:Connect(updateDerivedStats)
-maxHP.Changed:Connect(updateDerivedStats)
-maxStamina.Changed:Connect(updateDerivedStats)
-
-statPoints.Changed:Connect(function()
-	statPointsValue.Text = tostring(statPoints.Value)
-end)
-
-level.Changed:Connect(function()
-	levelXPText.Text = "Level " .. level.Value .. " | " .. xp.Value .. "/" .. xpRequired.Value .. " XP"
-end)
-
-xp.Changed:Connect(function()
-	levelXPText.Text = "Level " .. level.Value .. " | " .. xp.Value .. "/" .. xpRequired.Value .. " XP"
-end)
-
-xpRequired.Changed:Connect(function()
-	levelXPText.Text = "Level " .. level.Value .. " | " .. xp.Value .. "/" .. xpRequired.Value .. " XP"
-end)
+strength.Changed:Connect(refreshAll)
+dexterity.Changed:Connect(refreshAll)
+constitution.Changed:Connect(refreshAll)
+intelligence.Changed:Connect(refreshAll)
+speed.Changed:Connect(refreshAll)
+defense.Changed:Connect(refreshAll)
+spellRange.Changed:Connect(refreshAll)
+wordCount.Changed:Connect(refreshAll)
+maxHP.Changed:Connect(refreshAll)
+maxStamina.Changed:Connect(refreshAll)
+level.Changed:Connect(refreshAll)
+xp.Changed:Connect(refreshAll)
+xpRequired.Changed:Connect(refreshAll)
 
 -- ============================================================================
--- TOGGLE FUNCTIONALITY
+-- TOGGLE
 -- ============================================================================
 
 local isOpen = false
@@ -543,22 +548,18 @@ local function togglePanel()
 	mainPanel.Visible = isOpen
 
 	if isOpen then
-		-- Fade in animation
-		mainPanel.GroupTransparency = 1
-		mainPanel.Position = UDim2.new(0.5, -CONFIG.PanelWidth/2, 0.5, -CONFIG.PanelHeight/2 - 20)
-
-		local tween = TweenService:Create(mainPanel, TweenInfo.new(0.3, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
-			GroupTransparency = 0,
+		if _G.HideHUD then _G.HideHUD() end
+		mainPanel.Position = UDim2.new(0.5, -CONFIG.PanelWidth/2, 0.5, -CONFIG.PanelHeight/2 - 15)
+		TweenService:Create(mainPanel, TweenInfo.new(0.25, Enum.EasingStyle.Quart, Enum.EasingDirection.Out), {
 			Position = UDim2.new(0.5, -CONFIG.PanelWidth/2, 0.5, -CONFIG.PanelHeight/2)
-		})
-		tween:Play()
+		}):Play()
+	else
+		if _G.ShowHUD then _G.ShowHUD() end
 	end
 end
 
--- Close button
 closeButton.MouseButton1Click:Connect(togglePanel)
 
--- Close button hover
 closeButton.MouseEnter:Connect(function()
 	TweenService:Create(closeButton, TweenInfo.new(0.1), {BackgroundColor3 = CONFIG.ButtonHoverColor}):Play()
 end)
@@ -566,13 +567,12 @@ closeButton.MouseLeave:Connect(function()
 	TweenService:Create(closeButton, TweenInfo.new(0.1), {BackgroundColor3 = CONFIG.ButtonColor}):Play()
 end)
 
--- Keyboard toggle
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
 	if gameProcessed then return end
-
 	if input.KeyCode == CONFIG.ToggleKey then
 		togglePanel()
 	end
 end)
 
-print("âœ“ Stat Sheet GUI loaded! Press 'C' to open/close")
+print("? Stat Sheet GUI loaded! Press 'C' to open/close")
+print("  Showing stat XP progress bars — stats raised by minigame training")

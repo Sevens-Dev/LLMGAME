@@ -52,7 +52,7 @@ openButton.Size = UDim2.new(0, 80, 0, 80)
 openButton.Position = UDim2.new(1, -100, 0, 20) -- Top right
 openButton.BackgroundColor3 = Color3.fromRGB(40, 35, 50)
 openButton.BorderSizePixel = 0
-openButton.Text = "📊" -- Stats icon
+openButton.Text = "??" -- Stats icon
 openButton.TextColor3 = Color3.fromRGB(180, 140, 230)
 openButton.Font = Enum.Font.GothamBold
 openButton.TextSize = 32
@@ -85,4 +85,4 @@ openButton.MouseButton1Click:Connect(function()
 	mainPanel.Visible = not mainPanel.Visible
 end)
 
-print("✓ Stat sheet opener button created for mobile/console")
+print("? Stat sheet opener button created for mobile/console")

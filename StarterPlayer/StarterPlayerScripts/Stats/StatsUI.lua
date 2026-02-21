@@ -84,10 +84,10 @@ end
 
 statRemote.OnClientEvent:Connect(function(responseType, message)
 	if responseType == "Success" then
-		print("✓ " .. message)
+		print("? " .. message)
 		-- Update UI here when you create it
 	elseif responseType == "Error" then
-		warn("✗ " .. message)
+		warn("? " .. message)
 		-- Show error message in UI
 	end
 end)
@@ -135,7 +135,7 @@ speed.Changed:Connect(function(newValue)
 	-- Update speed display here
 end)
 
-print("✓ StatsUI loaded for " .. player.Name)
+print("? StatsUI loaded for " .. player.Name)
 
 -- ============================================================================
 -- EXPOSE FUNCTIONS FOR UI BUTTONS
