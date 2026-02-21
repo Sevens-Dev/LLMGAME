@@ -24,7 +24,7 @@ repeat
 		end)
 		if success then
 			StatsManager = result
-			print("✓ AdminCommands loaded StatsManager")
+			print("? AdminCommands loaded StatsManager")
 		end
 	end
 until StatsManager
@@ -61,15 +61,15 @@ local function processCommand(player, message)
 	if command == "!givexp" then
 		local amount = tonumber(args[2]) or 100
 		StatsManager.GiveXP(player, amount)
-		sendMessage(player, "✓ Added " .. amount .. " XP!")
+		sendMessage(player, "? Added " .. amount .. " XP!")
 
 		-- !addstr [points]
 	elseif command == "!addstr" then
 		local points = tonumber(args[2]) or 1
 		if StatsManager.AddStrength(player, points) then
-			sendMessage(player, "✓ Added " .. points .. " Strength!")
+			sendMessage(player, "? Added " .. points .. " Strength!")
 		else
-			sendMessage(player, "✗ Not enough stat points!")
+			sendMessage(player, "? Not enough stat points!")
 		end
 
 		-- !adddex [points]
@@ -78,10 +78,10 @@ local function processCommand(player, message)
 		if StatsManager.AddDexterity(player, points) then
 			local stats = player:FindFirstChild("Stats")
 			if stats then
-				sendMessage(player, "✓ Added " .. points .. " Dexterity! (Speed: " .. math.floor(stats.Speed.Value) .. ")")
+				sendMessage(player, "? Added " .. points .. " Dexterity! (Speed: " .. math.floor(stats.Speed.Value) .. ")")
 			end
 		else
-			sendMessage(player, "✗ Not enough stat points!")
+			sendMessage(player, "? Not enough stat points!")
 		end
 
 		-- !addcon [points]
@@ -90,10 +90,10 @@ local function processCommand(player, message)
 		if StatsManager.AddConstitution(player, points) then
 			local stats = player:FindFirstChild("Stats")
 			if stats then
-				sendMessage(player, "✓ Added " .. points .. " Constitution! (HP: " .. math.floor(stats.MaxHP.Value) .. ")")
+				sendMessage(player, "? Added " .. points .. " Constitution! (HP: " .. math.floor(stats.MaxHP.Value) .. ")")
 			end
 		else
-			sendMessage(player, "✗ Not enough stat points!")
+			sendMessage(player, "? Not enough stat points!")
 		end
 
 		-- !addint [points]
@@ -102,10 +102,10 @@ local function processCommand(player, message)
 		if StatsManager.AddIntelligence(player, points) then
 			local stats = player:FindFirstChild("Stats")
 			if stats then
-				sendMessage(player, "✓ Added " .. points .. " Intelligence! (Range: " .. stats.SpellRange.Value .. ", Words: " .. stats.WordCount.Value .. ")")
+				sendMessage(player, "? Added " .. points .. " Intelligence! (Range: " .. stats.SpellRange.Value .. ", Words: " .. stats.WordCount.Value .. ")")
 			end
 		else
-			sendMessage(player, "✗ Not enough stat points!")
+			sendMessage(player, "? Not enough stat points!")
 		end
 
 		-- !stats
@@ -124,9 +124,9 @@ local function processCommand(player, message)
 		-- !save
 	elseif command == "!save" then
 		if StatsManager.SaveData(player) then
-			sendMessage(player, "✓ Data saved successfully!")
+			sendMessage(player, "? Data saved successfully!")
 		else
-			sendMessage(player, "✗ Save failed!")
+			sendMessage(player, "? Save failed!")
 		end
 
 		-- !damage
@@ -140,7 +140,7 @@ local function processCommand(player, message)
 		if stats then
 			stats.CurrentHP.Value = stats.MaxHP.Value
 			stats.CurrentStamina.Value = stats.MaxStamina.Value
-			sendMessage(player, "✓ Fully healed!")
+			sendMessage(player, "? Fully healed!")
 		end
 
 		-- !resetstats
@@ -158,7 +158,7 @@ local function processCommand(player, message)
 			stats.Intelligence.Value = 1
 			stats.StatPoints.Value = 0
 			StatsManager.RecalculateDerivedStats(player)
-			sendMessage(player, "✓ Stats reset to default!")
+			sendMessage(player, "? Stats reset to default!")
 		end
 
 		-- !help
@@ -191,4 +191,4 @@ for _, player in pairs(Players:GetPlayers()) do
 	end)
 end
 
-print("✓ AdminCommands loaded! Type !help for commands")
+print("? AdminCommands loaded! Type !help for commands")
