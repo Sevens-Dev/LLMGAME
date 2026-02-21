@@ -14,7 +14,7 @@ if not dataStoreModule then
 end
 
 local DataStoreManager = require(dataStoreModule)
-print("✓ StatDataStoreManager loaded")
+print("? StatDataStoreManager loaded")
 
 -- Step 2: Load PlayerStatsManager (this will also connect PlayerAdded)
 print("Loading PlayerStatsManager...")
@@ -24,7 +24,7 @@ if not statsModule then
 end
 
 local StatsManager = require(statsModule)
-print("✓ PlayerStatsManager loaded")
+print("? PlayerStatsManager loaded")
 
-print("✓ Stats system ready!")
+print("? Stats system ready!")
 print("=========================================")
