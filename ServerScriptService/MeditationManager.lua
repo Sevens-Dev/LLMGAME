@@ -1,6 +1,7 @@
 --[[
 	MeditationManager.lua (ServerScriptService)
 	Server-side logic for Meditation & Martial Arts Training
+	Awards Intelligence XP via the stat XP system
 --]]
 
 local Players = game:GetService("Players")
@@ -8,16 +9,16 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local MeditationConfig = require(ReplicatedStorage:WaitForChild("MeditationConfig"))
 
--- Load PlayerStatsManager for EXP rewards
+-- Load PlayerStatsManager for Intelligence XP rewards
 local PlayerStatsManager
 local success, result = pcall(function()
 	return require(game.ServerScriptService:WaitForChild("PlayerStatsManager"))
 end)
 if success then
 	PlayerStatsManager = result
-	print("🧘 PlayerStatsManager loaded for meditation EXP rewards")
+	print("?? PlayerStatsManager loaded — meditation will award Intelligence XP")
 else
-	warn("🧘 PlayerStatsManager not found - meditation won't award EXP")
+	warn("?? PlayerStatsManager not found — meditation won't award XP")
 end
 
 -- Create RemoteEvents
@@ -40,8 +41,8 @@ EnlightenmentEvent.Parent = RemoteEvents
 -- Player meditation sessions
 local MeditationSessions = {}
 
--- Setup meditation stats (NOT in leaderstats to avoid conflicts)
-local function setupMeditationStats(player: Player)
+-- Setup meditation stats
+local function setupMeditationStats(player)
 	local meditationStats = Instance.new("Folder")
 	meditationStats.Name = "MeditationStats"
 	meditationStats.Parent = player
@@ -67,12 +68,11 @@ local function setupMeditationStats(player: Player)
 	totalEnlightenment.Parent = meditationStats
 end
 
--- Initialize meditation session
-local function initializeSession(player: Player)
+local function initializeSession(player)
 	MeditationSessions[player.UserId] = {
 		CurrentLevel = 1,
 		TotalEnlightenment = 0,
-		Harmony = 0, -- Combo counter
+		Harmony = 0,
 		Chi = 0,
 		HighestLevel = 0,
 		CurrentPath = {},
@@ -84,36 +84,30 @@ local function initializeSession(player: Player)
 end
 
 -- Generate chi flow path
-local function generateChiPath(length: number, gridSize: number): {number}
+local function generateChiPath(length, gridSize)
 	local path = {}
 	local maxTileIndex = gridSize * gridSize
 	local usedTiles = {}
 
-	-- First tile is random
 	local firstTile = math.random(1, maxTileIndex)
 	table.insert(path, firstTile)
 	usedTiles[firstTile] = true
 
-	-- Subsequent tiles prefer adjacent ones (more natural flow)
 	for i = 2, length do
 		local lastTile = path[#path]
 		local adjacentTiles = getAdjacentTiles(lastTile, gridSize)
 
-		-- Try to use an adjacent tile that hasn't been used
-		local nextTile
 		local availableAdjacent = {}
-
 		for _, adjTile in ipairs(adjacentTiles) do
 			if not usedTiles[adjTile] then
 				table.insert(availableAdjacent, adjTile)
 			end
 		end
 
+		local nextTile
 		if #availableAdjacent > 0 then
-			-- Use adjacent tile for natural flow
 			nextTile = availableAdjacent[math.random(1, #availableAdjacent)]
 		else
-			-- All adjacent used, pick any unused tile
 			repeat
 				nextTile = math.random(1, maxTileIndex)
 			until not usedTiles[nextTile]
@@ -126,25 +120,21 @@ local function generateChiPath(length: number, gridSize: number): {number}
 	return path
 end
 
--- Get adjacent tiles (for natural chi flow)
-function getAdjacentTiles(tileIndex: number, gridSize: number): {number}
+function getAdjacentTiles(tileIndex, gridSize)
 	local row = math.floor((tileIndex - 1) / gridSize)
 	local col = (tileIndex - 1) % gridSize
 	local adjacent = {}
 
-	-- Cardinal directions
 	local directions = {
-		{-1, 0}, {1, 0}, {0, -1}, {0, 1}, -- Up, Down, Left, Right
-		{-1, -1}, {-1, 1}, {1, -1}, {1, 1} -- Diagonals
+		{-1, 0}, {1, 0}, {0, -1}, {0, 1},
+		{-1, -1}, {-1, 1}, {1, -1}, {1, 1}
 	}
 
 	for _, dir in ipairs(directions) do
 		local newRow = row + dir[1]
 		local newCol = col + dir[2]
-
 		if newRow >= 0 and newRow < gridSize and newCol >= 0 and newCol < gridSize then
-			local newIndex = newRow * gridSize + newCol + 1
-			table.insert(adjacent, newIndex)
+			table.insert(adjacent, newRow * gridSize + newCol + 1)
 		end
 	end
 
@@ -152,14 +142,13 @@ function getAdjacentTiles(tileIndex: number, gridSize: number): {number}
 end
 
 -- Handle meditation begin
-BeginMeditationEvent.OnServerEvent:Connect(function(player: Player)
+BeginMeditationEvent.OnServerEvent:Connect(function(player)
 	local session = MeditationSessions[player.UserId]
 	if not session then
 		initializeSession(player)
 		session = MeditationSessions[player.UserId]
 	end
 
-	-- Reset for new session
 	session.CurrentLevel = 1
 	session.TotalEnlightenment = 0
 	session.Harmony = 0
@@ -169,18 +158,13 @@ BeginMeditationEvent.OnServerEvent:Connect(function(player: Player)
 	session.PerfectFlows = 0
 	session.StartTime = os.time()
 
-	-- Increment total sessions
 	if player:FindFirstChild("MeditationStats") then
 		player.MeditationStats.TotalSessions.Value += 1
 	end
 
-	-- Get difficulty for level 1
 	local difficulty = MeditationConfig.GetDifficultyForLevel(1)
-
-	-- Generate chi path for level 1
 	session.CurrentPath = generateChiPath(difficulty.PathLength, MeditationConfig.GridSize)
 
-	-- Send to client
 	BeginMeditationEvent:FireClient(player, {
 		Level = 1,
 		ChiPath = session.CurrentPath,
@@ -190,13 +174,11 @@ BeginMeditationEvent.OnServerEvent:Connect(function(player: Player)
 end)
 
 -- Handle flow submission
-SubmitFlowEvent.OnServerEvent:Connect(function(player: Player, playerPath: {number})
+SubmitFlowEvent.OnServerEvent:Connect(function(player, playerPath)
 	local session = MeditationSessions[player.UserId]
-	if not session or not session.IsMeditating then
-		return
-	end
+	if not session or not session.IsMeditating then return end
 
-	-- Validate the chi flow
+	-- Validate chi flow
 	local isHarmony = true
 	local mistakes = 0
 
@@ -214,13 +196,11 @@ SubmitFlowEvent.OnServerEvent:Connect(function(player: Player, playerPath: {numb
 
 	session.Mistakes = mistakes
 
-	-- Check for mindfulness bonus (deliberate, unhurried play)
 	local sessionDuration = os.time() - session.StartTime
-	local expectedMinTime = #session.CurrentPath * 2 -- Rough estimate
+	local expectedMinTime = #session.CurrentPath * 2
 	local isMindful = sessionDuration >= expectedMinTime
 
 	if isHarmony then
-		-- Harmony achieved!
 		session.Harmony += 1
 		session.Chi = math.min(session.Chi + MeditationConfig.ChiPerLevel, MeditationConfig.MaxChi)
 
@@ -231,7 +211,6 @@ SubmitFlowEvent.OnServerEvent:Connect(function(player: Player, playerPath: {numb
 			end
 		end
 
-		-- Calculate enlightenment (EXP reward)
 		local enlightenment = MeditationConfig.CalculateEnlightenment(
 			session.CurrentLevel,
 			mistakes,
@@ -242,7 +221,6 @@ SubmitFlowEvent.OnServerEvent:Connect(function(player: Player, playerPath: {numb
 		session.TotalEnlightenment += enlightenment
 		session.CurrentLevel += 1
 
-		-- Update highest level
 		if session.CurrentLevel > session.HighestLevel then
 			session.HighestLevel = session.CurrentLevel
 			if player:FindFirstChild("MeditationStats") then
@@ -250,46 +228,31 @@ SubmitFlowEvent.OnServerEvent:Connect(function(player: Player, playerPath: {numb
 			end
 		end
 
-		-- Store total enlightenment
 		if player:FindFirstChild("MeditationStats") then
 			player.MeditationStats.TotalEnlightenment.Value = session.TotalEnlightenment
 		end
 
-		-- Award EXP to player's main stats system
-		-- POLYNOMIAL XP SCALING - Higher levels give much more EXP!
+		-- ============================================================
+		-- AWARD INTELLIGENCE XP (not combat XP)
+		-- Meditation trains the mind — feeds the Intelligence stat pool
+		-- Formula: polynomial scaling so deeper meditation is more rewarding
+		-- ============================================================
+		local intXPAmount = math.floor(enlightenment * (session.CurrentLevel ^ 2) / 100)
 
-		-- Choose your formula (comment/uncomment the one you want):
-
-		-- OPTION 1: Quadratic (Level^2) - Moderate scaling
-		local expAmount = math.floor(enlightenment * (session.CurrentLevel ^ 2) / 100)
-
-		-- OPTION 2: Cubic (Level^3) - Aggressive scaling
-		-- local expAmount = math.floor(enlightenment * (session.CurrentLevel ^ 3) / 1000)
-
-		-- OPTION 3: Square root polynomial - Gentle curve
-		-- local expAmount = math.floor(enlightenment * math.sqrt(session.CurrentLevel) / 5)
-
-		-- OPTION 4: Custom polynomial (aLevel^2 + bLevel + c)
-		-- local expAmount = math.floor((session.CurrentLevel ^ 2) * 5 + session.CurrentLevel * 10 + enlightenment / 10)
-
-		-- OPTION 5: Exponential (not polynomial but very rewarding)
-		-- local expAmount = math.floor(enlightenment * (1.5 ^ session.CurrentLevel) / 10)
-
-		if PlayerStatsManager and PlayerStatsManager.GiveXP then
-			PlayerStatsManager.GiveXP(player, expAmount)
-			print("🧘 " .. player.Name .. " earned " .. expAmount .. " EXP from meditation Level " .. session.CurrentLevel .. " (Enlightenment: " .. enlightenment .. ")")
+		if PlayerStatsManager and PlayerStatsManager.GiveIntelligenceXP then
+			local rankedUp = PlayerStatsManager.GiveIntelligenceXP(player, intXPAmount)
+			print("?? " .. player.Name .. " earned " .. intXPAmount .. " Intelligence XP from meditation Level " .. session.CurrentLevel)
+			if rankedUp then
+				print("?? " .. player.Name .. "'s Intelligence ranked up!")
+			end
 		else
-			warn("🧘 Failed to award EXP - PlayerStatsManager not available")
+			warn("?? Failed to award Intelligence XP — PlayerStatsManager not available")
 		end
 
-		-- Get difficulty for next level
 		local difficulty = MeditationConfig.GetDifficultyForLevel(session.CurrentLevel)
-
-		-- Generate next path
 		session.CurrentPath = generateChiPath(difficulty.PathLength, MeditationConfig.GridSize)
 		session.StartTime = os.time()
 
-		-- Send success to client
 		EnlightenmentEvent:FireClient(player, {
 			Success = true,
 			Level = session.CurrentLevel,
@@ -304,7 +267,6 @@ SubmitFlowEvent.OnServerEvent:Connect(function(player: Player, playerPath: {numb
 			PerfectFlow = mistakes == 0
 		})
 	else
-		-- Flow disrupted
 		session.IsMeditating = false
 
 		EnlightenmentEvent:FireClient(player, {
@@ -318,7 +280,6 @@ SubmitFlowEvent.OnServerEvent:Connect(function(player: Player, playerPath: {numb
 	end
 end)
 
--- Player management
 Players.PlayerAdded:Connect(function(player)
 	setupMeditationStats(player)
 	initializeSession(player)
@@ -328,4 +289,4 @@ Players.PlayerRemoving:Connect(function(player)
 	MeditationSessions[player.UserId] = nil
 end)
 
-print("🧘 Meditation & Martial Arts Training - Server Active")
+print("?? MeditationManager loaded — awards Intelligence XP on success")
